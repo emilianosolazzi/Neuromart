@@ -146,21 +146,22 @@ export default function ModelDetail() {
             </div>
 
             {/* CTA */}
-            <div className="bg-zinc-900 border border-zinc-800 rounded-3xl p-8 flex flex-col sm:flex-row sm:items-center justify-between gap-6">
-              <div>
-                <p className="text-sm text-zinc-400 uppercase tracking-wider font-display font-bold mb-1">Pricing</p>
+            <div className="bg-zinc-900 border border-accent/20 rounded-3xl p-8 flex flex-col sm:flex-row sm:items-center justify-between gap-6 shadow-2xl shadow-accent/5 relative overflow-hidden group">
+              <div className="absolute inset-0 bg-gradient-to-br from-accent/5 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500" />
+              <div className="relative z-10">
+                <p className="text-sm text-accent uppercase tracking-widest font-display font-bold mb-1">Premium Access</p>
                 <div className="flex items-baseline gap-2">
-                  <span className="text-4xl font-bold text-white">${model.pricePerQuery}</span>
+                  <span className="text-5xl font-bold text-white tracking-tighter">${model.pricePerQuery}</span>
                   <span className="text-zinc-500 font-medium">per query</span>
                 </div>
               </div>
               <Button 
                 size="lg" 
-                className="bg-white text-black hover:bg-zinc-200 rounded-full px-8 py-6 text-lg font-bold shadow-lg shadow-white/10 hover:scale-105 transition-all w-full sm:w-auto"
+                className="bg-accent-gradient text-white border-0 rounded-full px-10 py-8 text-xl font-bold shadow-xl shadow-accent/20 hover:shadow-accent/40 hover:scale-[1.02] active:scale-[0.98] transition-all w-full sm:w-auto relative z-10"
                 onClick={handleRent}
                 disabled={rentMutation.isPending}
               >
-                {rentMutation.isPending ? "Processing..." : "Rent Access Now"}
+                {rentMutation.isPending ? "Configuring Access..." : "Rent Access Now"}
               </Button>
             </div>
             

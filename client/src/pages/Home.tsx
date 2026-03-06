@@ -37,24 +37,27 @@ export default function Home() {
             <span className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-white/5 border border-white/10 text-xs font-medium text-zinc-300 mb-6">
               <Sparkles className="w-3 h-3 text-primary" /> Discover the new standard of AI
             </span>
-            <h1 className="text-5xl md:text-7xl font-display font-extrabold tracking-tight mb-8 leading-tight">
+            <h1 className="text-5xl md:text-8xl font-display font-extrabold tracking-tight mb-8 leading-[1.1]">
               Intelligence <br className="hidden md:block"/>
               <span className="text-gradient">on Demand</span>
             </h1>
-            <p className="text-lg md:text-xl text-zinc-400 mb-10 max-w-2xl mx-auto leading-relaxed">
+            <p className="text-lg md:text-2xl text-zinc-400 mb-12 max-w-2xl mx-auto leading-relaxed font-medium">
               Rent highly specialized, custom-trained AI models from top creators. Integrate expert knowledge directly into your workflow.
             </p>
             
-            <div className="relative max-w-xl mx-auto">
-              <div className="absolute inset-y-0 left-4 flex items-center pointer-events-none">
-                <Search className="h-5 w-5 text-zinc-500" />
+            <div className="relative max-w-2xl mx-auto group">
+              <div className="absolute -inset-1 bg-gradient-to-r from-accent/50 to-blue-500/50 rounded-2xl blur opacity-25 group-hover:opacity-50 transition duration-1000 group-hover:duration-200"></div>
+              <div className="relative">
+                <div className="absolute inset-y-0 left-5 flex items-center pointer-events-none">
+                  <Search className="h-6 w-6 text-zinc-500 group-focus-within:text-accent transition-colors" />
+                </div>
+                <Input 
+                  className="w-full pl-14 pr-6 py-8 rounded-2xl bg-black/50 border-zinc-800 text-xl focus-visible:ring-2 focus-visible:ring-accent/50 focus-visible:border-accent placeholder:text-zinc-600 transition-all backdrop-blur-xl"
+                  placeholder="Search models, categories, or creators..."
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                />
               </div>
-              <Input 
-                className="w-full pl-12 pr-4 py-6 rounded-2xl bg-zinc-900/50 border-zinc-800 text-lg focus-visible:ring-1 focus-visible:ring-primary focus-visible:border-primary placeholder:text-zinc-600 transition-all"
-                placeholder="Search models, categories, or creators..."
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-              />
             </div>
           </motion.div>
         </div>
