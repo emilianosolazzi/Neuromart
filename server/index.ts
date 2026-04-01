@@ -2,6 +2,7 @@ import express, { type Request, Response, NextFunction } from "express";
 import { registerRoutes } from "./routes";
 import { serveStatic } from "./static";
 import { createServer } from "http";
+import { closeDatabase } from "./db";
 
 const app = express();
 const httpServer = createServer(app);
@@ -12,15 +13,18 @@ declare module "http" {
   }
 }
 
+app.disable("x-powered-by");
+
 app.use(
   express.json({
     verify: (req, _res, buf) => {
       req.rawBody = buf;
     },
+    limit: "1mb",
   }),
 );
 
-app.use(express.urlencoded({ extended: false }));
+app.use(express.urlencoded({ extended: false, limit: "1mb" }));
 
 export function log(message: string, source = "express") {
   const formattedTime = new Date().toLocaleTimeString("en-US", {
@@ -33,23 +37,62 @@ export function log(message: string, source = "express") {
   console.log(`${formattedTime} [${source}] ${message}`);
 }
 
+const REDACTED_LOG_KEYS = new Set([
+  "token",
+  "systemprompt",
+  "password",
+  "authorization",
+  "apikey",
+]);
+
+function sanitizeForLog(value: unknown): unknown {
+  if (typeof value === "string") {
+    return value.length > 300 ? `${value.slice(0, 300)}...[truncated]` : value;
+  }
+
+  if (Array.isArray(value)) {
+    const sanitizedItems = value.slice(0, 20).map((item) => sanitizeForLog(item));
+    if (value.length > 20) {
+      sanitizedItems.push(`[truncated ${value.length - 20} items]`);
+    }
+    return sanitizedItems;
+  }
+
+  if (value && typeof value === "object") {
+    const sanitizedObject: Record<string, unknown> = {};
+    for (const [key, nestedValue] of Object.entries(value as Record<string, unknown>)) {
+      if (REDACTED_LOG_KEYS.has(key.toLowerCase())) {
+        sanitizedObject[key] = "[REDACTED]";
+      } else {
+        sanitizedObject[key] = sanitizeForLog(nestedValue);
+      }
+    }
+    return sanitizedObject;
+  }
+
+  return value;
+}
+
 app.use((req, res, next) => {
   const start = Date.now();
   const path = req.path;
-  let capturedJsonResponse: Record<string, any> | undefined = undefined;
+  const includeResponseBody = process.env.NODE_ENV !== "production";
+  let capturedJsonResponse: unknown;
 
-  const originalResJson = res.json;
-  res.json = function (bodyJson, ...args) {
-    capturedJsonResponse = bodyJson;
-    return originalResJson.apply(res, [bodyJson, ...args]);
-  };
+  if (includeResponseBody) {
+    const originalResJson = res.json;
+    res.json = function (bodyJson, ...args) {
+      capturedJsonResponse = bodyJson;
+      return originalResJson.apply(res, [bodyJson, ...args]);
+    };
+  }
 
   res.on("finish", () => {
     const duration = Date.now() - start;
     if (path.startsWith("/api")) {
       let logLine = `${req.method} ${path} ${res.statusCode} in ${duration}ms`;
-      if (capturedJsonResponse) {
-        logLine += ` :: ${JSON.stringify(capturedJsonResponse)}`;
+      if (includeResponseBody && capturedJsonResponse !== undefined) {
+        logLine += ` :: ${JSON.stringify(sanitizeForLog(capturedJsonResponse))}`;
       }
 
       log(logLine);
@@ -101,5 +144,40 @@ app.use((req, res, next) => {
 
   httpServer.listen(listenOptions, () => {
     log(`serving on port ${port}`);
+  });
+
+  let isShuttingDown = false;
+  const shutdown = async (signal: "SIGINT" | "SIGTERM") => {
+    if (isShuttingDown) {
+      return;
+    }
+
+    isShuttingDown = true;
+    log(`received ${signal}, shutting down gracefully`);
+
+    await new Promise<void>((resolve) => {
+      httpServer.close((err) => {
+        if (err) {
+          console.error("Error closing HTTP server:", err);
+        }
+        resolve();
+      });
+    });
+
+    try {
+      await closeDatabase();
+    } catch (err) {
+      console.error("Error closing database:", err);
+    }
+
+    process.exit(0);
+  };
+
+  process.on("SIGINT", () => {
+    void shutdown("SIGINT");
+  });
+
+  process.on("SIGTERM", () => {
+    void shutdown("SIGTERM");
   });
 })();

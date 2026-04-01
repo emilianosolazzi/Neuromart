@@ -16,6 +16,7 @@ export async function registerRoutes(
   app: Express
 ): Promise<Server> {
   const idParamSchema = z.object({ id: z.coerce.number().int().positive() });
+  const MAX_QUALITY_SORT_SCAN = 1000;
 
   const qualityScoreOf = (m: {
     name?: string | null;
@@ -72,7 +73,7 @@ export async function registerRoutes(
         const allModels = await storage.getAiModels({
           ...query,
           page: 1,
-          pageSize: 5000,
+          pageSize: MAX_QUALITY_SORT_SCAN,
         });
         allModels.sort((a, b) => qualityScoreOf(b) - qualityScoreOf(a));
         const start = (query.page - 1) * query.pageSize;
@@ -108,10 +109,20 @@ export async function registerRoutes(
 
   app.post(api.models.create.path, async (req, res) => {
     try {
+      const parsedBody = z.object({
+        creatorId: z.coerce.number().int().positive(),
+      }).passthrough().parse(req.body);
+
       const input = api.models.create.input.parse({
-        ...req.body,
-        creatorId: Number(req.body.creatorId),
+        ...parsedBody,
+        creatorId: parsedBody.creatorId,
       });
+
+      const creator = await storage.getUser(input.creatorId);
+      if (!creator) {
+        return res.status(400).json({ message: "Creator not found", field: "creatorId" });
+      }
+
       const model = await storage.createAiModel(input);
       res.status(201).json(model);
     } catch (err) {
@@ -122,7 +133,7 @@ export async function registerRoutes(
     }
   });
 
-  app.patch("/api/models/:id", async (req, res) => {
+  app.patch(api.models.update.path, async (req, res) => {
     try {
       const { id } = idParamSchema.parse(req.params);
       const data = updateAiModelInputSchema.parse(req.body);
@@ -137,7 +148,7 @@ export async function registerRoutes(
     }
   });
 
-  app.delete("/api/models/:id", async (req, res) => {
+  app.delete(api.models.delete.path, async (req, res) => {
     try {
       const { id } = idParamSchema.parse(req.params);
       const deleted = await storage.deleteAiModel(id);
@@ -172,10 +183,27 @@ export async function registerRoutes(
   app.post(api.rentals.create.path, async (req, res) => {
     try {
       const bodySchema = api.rentals.create.input.extend({
-        renterId: z.coerce.number(),
-        modelId: z.coerce.number(),
+        renterId: z.coerce.number().int().positive(),
+        modelId: z.coerce.number().int().positive(),
       });
       const input = bodySchema.parse(req.body);
+
+      const renter = await storage.getUser(input.renterId);
+      if (!renter) {
+        return res.status(404).json({ message: "Renter not found" });
+      }
+
+      const model = await storage.getAiModel(input.modelId);
+      if (!model) {
+        return res.status(404).json({ message: "Model not found" });
+      }
+
+      if (model.modelStatus !== "published" && model.modelStatus !== "beta") {
+        return res.status(400).json({
+          message: "Model must be published or beta to be rented.",
+          field: "modelId",
+        });
+      }
 
       const alreadyRented = await storage.hasActiveRental(input.renterId, input.modelId);
       if (alreadyRented) {
@@ -192,7 +220,7 @@ export async function registerRoutes(
     }
   });
 
-  app.patch("/api/rentals/:id/cancel", async (req, res) => {
+  app.patch(api.rentals.cancel.path, async (req, res) => {
     try {
       const { id } = idParamSchema.parse(req.params);
       const rental = await storage.cancelRental(id);
@@ -229,33 +257,37 @@ export async function registerRoutes(
 
   // Token validation — publishers call this to verify renter access
   app.post("/api/validate-token", async (req, res) => {
-    const tokenSchema = z.object({ token: z.string() });
-    const parsed = tokenSchema.safeParse(req.body);
-    if (!parsed.success) {
-      return res.status(400).json({ valid: false, error: "Invalid token format" });
+    try {
+      const tokenSchema = z.object({ token: z.string() });
+      const parsed = tokenSchema.safeParse(req.body);
+      if (!parsed.success) {
+        return res.status(400).json({ valid: false, error: "Invalid token format" });
+      }
+
+      const token = parsed.data.token.trim();
+      // Expected format: nm_{rentalId}_auth_token
+      const match = /^nm_(\d+)_auth_token$/.exec(token);
+      if (!match) {
+        return res.status(400).json({ valid: false, error: "Invalid token format" });
+      }
+
+      const rentalId = Number(match[1]);
+      const rental = await storage.getRentalById(rentalId);
+
+      if (!rental || rental.status !== "active") {
+        return res.status(401).json({ valid: false, error: "Token not found or rental is not active" });
+      }
+
+      res.json({
+        valid: true,
+        rentalId: rental.id,
+        modelId: rental.modelId,
+        renterId: rental.renterId,
+        status: rental.status,
+      });
+    } catch (_err) {
+      return res.status(500).json({ valid: false, error: "Internal Error" });
     }
-
-    const token = parsed.data.token.trim();
-    // Expected format: nm_{rentalId}_auth_token
-    const match = /^nm_(\d+)_auth_token$/.exec(token);
-    if (!match) {
-      return res.status(400).json({ valid: false, error: "Invalid token format" });
-    }
-
-    const rentalId = Number(match[1]);
-    const rental = await storage.getRentalById(rentalId);
-
-    if (!rental || rental.status !== "active") {
-      return res.status(401).json({ valid: false, error: "Token not found or rental is not active" });
-    }
-
-    res.json({
-      valid: true,
-      rentalId: rental.id,
-      modelId: rental.modelId,
-      renterId: rental.renterId,
-      status: rental.status,
-    });
   });
 
   // Seed database

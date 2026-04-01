@@ -13,3 +13,9 @@ export const pool = hasDatabase
 export const db = pool
   ? drizzle(pool, { schema })
   : null;
+
+export async function closeDatabase(): Promise<void> {
+  if (pool) {
+    await pool.end();
+  }
+}
