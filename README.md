@@ -1,2 +1,2 @@
-# Neromart
+# Neuromart
 Specialized AI exchange
