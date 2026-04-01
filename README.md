@@ -162,10 +162,3 @@ Model statuses:
 ## Publishing & Integration
 
 For publisher token flow and integration examples, see `PUBLISHER_GUIDE.md`.
-
-## License
-
-MIT
-=======
-Specialized AI exchange
->>>>>>> 24e516150ec0aad6a28c53493b1c582377cffe19
