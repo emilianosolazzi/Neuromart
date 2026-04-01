@@ -1,4 +1,4 @@
-import type { Express } from "express";
+import type { Express, Request } from "express";
 import type { Server } from "http";
 import { storage } from "./storage";
 import { api } from "@shared/routes";
@@ -17,6 +17,27 @@ export async function registerRoutes(
 ): Promise<Server> {
   const idParamSchema = z.object({ id: z.coerce.number().int().positive() });
   const MAX_QUALITY_SORT_SCAN = 1000;
+  const actorHeaderSchema = z.coerce.number().int().positive();
+
+  const getActorId = (req: Request): number | null => {
+    const rawHeader = req.headers["x-user-id"];
+    const value = Array.isArray(rawHeader) ? rawHeader[0] : rawHeader;
+    if (!value) {
+      return null;
+    }
+
+    const parsed = actorHeaderSchema.safeParse(value);
+    return parsed.success ? parsed.data : null;
+  };
+
+  const requireActorId = (req: Request, res: any): number | null => {
+    const actorId = getActorId(req);
+    if (!actorId) {
+      res.status(401).json({ message: "Authentication required", field: "x-user-id" });
+      return null;
+    }
+    return actorId;
+  };
 
   const qualityScoreOf = (m: {
     name?: string | null;
@@ -109,9 +130,16 @@ export async function registerRoutes(
 
   app.post(api.models.create.path, async (req, res) => {
     try {
+      const actorId = requireActorId(req, res);
+      if (!actorId) return;
+
       const parsedBody = z.object({
         creatorId: z.coerce.number().int().positive(),
       }).passthrough().parse(req.body);
+
+      if (parsedBody.creatorId !== actorId) {
+        return res.status(403).json({ message: "Creator does not match authenticated user", field: "creatorId" });
+      }
 
       const input = api.models.create.input.parse({
         ...parsedBody,
@@ -135,7 +163,16 @@ export async function registerRoutes(
 
   app.patch(api.models.update.path, async (req, res) => {
     try {
+      const actorId = requireActorId(req, res);
+      if (!actorId) return;
+
       const { id } = idParamSchema.parse(req.params);
+      const existing = await storage.getAiModel(id);
+      if (!existing) return res.status(404).json({ message: "Model not found" });
+      if (existing.creatorId !== actorId) {
+        return res.status(403).json({ message: "Forbidden" });
+      }
+
       const data = updateAiModelInputSchema.parse(req.body);
       const updated = await storage.updateAiModel(id, data);
       if (!updated) return res.status(404).json({ message: "Model not found" });
@@ -150,7 +187,16 @@ export async function registerRoutes(
 
   app.delete(api.models.delete.path, async (req, res) => {
     try {
+      const actorId = requireActorId(req, res);
+      if (!actorId) return;
+
       const { id } = idParamSchema.parse(req.params);
+      const existing = await storage.getAiModel(id);
+      if (!existing) return res.status(404).json({ message: "Model not found" });
+      if (existing.creatorId !== actorId) {
+        return res.status(403).json({ message: "Forbidden" });
+      }
+
       const deleted = await storage.deleteAiModel(id);
       if (!deleted) return res.status(404).json({ message: "Model not found" });
       res.status(204).end();
@@ -182,11 +228,18 @@ export async function registerRoutes(
 
   app.post(api.rentals.create.path, async (req, res) => {
     try {
+      const actorId = requireActorId(req, res);
+      if (!actorId) return;
+
       const bodySchema = api.rentals.create.input.extend({
         renterId: z.coerce.number().int().positive(),
         modelId: z.coerce.number().int().positive(),
       });
       const input = bodySchema.parse(req.body);
+
+      if (input.renterId !== actorId) {
+        return res.status(403).json({ message: "Renter does not match authenticated user", field: "renterId" });
+      }
 
       const renter = await storage.getUser(input.renterId);
       if (!renter) {
@@ -222,7 +275,16 @@ export async function registerRoutes(
 
   app.patch(api.rentals.cancel.path, async (req, res) => {
     try {
+      const actorId = requireActorId(req, res);
+      if (!actorId) return;
+
       const { id } = idParamSchema.parse(req.params);
+      const existing = await storage.getRentalById(id);
+      if (!existing) return res.status(404).json({ message: "Rental not found" });
+      if (existing.renterId !== actorId) {
+        return res.status(403).json({ message: "Forbidden" });
+      }
+
       const rental = await storage.cancelRental(id);
       if (!rental) return res.status(404).json({ message: "Rental not found" });
       res.json(rental);
@@ -237,9 +299,15 @@ export async function registerRoutes(
   // Publisher analytics — rental counts for a specific listing
   app.get("/api/models/:id/stats", async (req, res) => {
     try {
+      const actorId = requireActorId(req, res);
+      if (!actorId) return;
+
       const { id: modelId } = idParamSchema.parse(req.params);
       const model = await storage.getAiModel(modelId);
       if (!model) return res.status(404).json({ message: "Model not found" });
+      if (model.creatorId !== actorId) {
+        return res.status(403).json({ message: "Forbidden" });
+      }
 
       const rentalList = await storage.getRentalsByModelId(modelId);
       res.json({

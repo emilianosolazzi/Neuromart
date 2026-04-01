@@ -73,13 +73,16 @@ export function useModel(id: number | null) {
   });
 }
 
-export function useCreateModel() {
+export function useCreateModel(userId: number | null) {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: async (data: CreateAiModelInput) => {
       const res = await fetch(api.models.create.path, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          ...(userId ? { "x-user-id": String(userId) } : {}),
+        },
         body: JSON.stringify(data),
       });
       if (!res.ok) {
@@ -100,14 +103,18 @@ export type ModelStats = {
   activeRentals: number;
 };
 
-export function useModelStats(modelId: number | null) {
+export function useModelStats(modelId: number | null, userId: number | null) {
   return useQuery<ModelStats>({
-    queryKey: ["/api/models", modelId, "stats"],
+    queryKey: ["/api/models", modelId, "stats", userId],
     queryFn: async () => {
-      const res = await fetch(`/api/models/${modelId}/stats`);
+      const res = await fetch(`/api/models/${modelId}/stats`, {
+        headers: {
+          ...(userId ? { "x-user-id": String(userId) } : {}),
+        },
+      });
       if (!res.ok) throw new Error("Failed to fetch model stats");
       return res.json();
     },
-    enabled: !!modelId,
+    enabled: !!modelId && !!userId,
   });
 }

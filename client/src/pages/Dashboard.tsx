@@ -99,8 +99,8 @@ function QualityMeter({ specialistNiche }: { specialistNiche: string }) {
   );
 }
 
-function HostedModelCard({ model }: { model: import("@shared/schema").AiModelWithCreator }) {
-  const { data: stats } = useModelStats(model.id);
+function HostedModelCard({ model, actorId }: { model: import("@shared/schema").AiModelWithCreator; actorId: number | null }) {
+  const { data: stats } = useModelStats(model.id, actorId);
   return (
     <div className="section-frame p-6 flex items-center justify-between gap-6">
       <div className="min-w-0 flex-1">
@@ -148,7 +148,7 @@ export default function Dashboard() {
     pageSize: 24,
   });
 
-  const createMutation = useCreateModel();
+  const createMutation = useCreateModel(userId);
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const activeRentals = rentals?.length ?? 0;
   const activeListings = myModels?.length ?? 0;
@@ -580,7 +580,7 @@ export default function Dashboard() {
             ) : (
               <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
                 {myModels?.map((model) => (
-                  <HostedModelCard key={model.id} model={model} />
+                  <HostedModelCard key={model.id} model={model} actorId={userId} />
                 ))}
               </div>
             )}

@@ -32,7 +32,7 @@ export default function ModelDetail() {
   const { userId } = useUser();
   const { toast } = useToast();
   const [, setLocation] = useLocation();
-  const rentMutation = useCreateRental();
+  const rentMutation = useCreateRental(userId);
 
   const handleRent = () => {
     if (!userId || !model) {

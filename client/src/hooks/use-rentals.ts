@@ -29,13 +29,16 @@ export function useRentals(params?: UseRentalsParams) {
   });
 }
 
-export function useCreateRental() {
+export function useCreateRental(userId: number | null) {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: async (data: InsertRental) => {
       const res = await fetch(api.rentals.create.path, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          ...(userId ? { "x-user-id": String(userId) } : {}),
+        },
         body: JSON.stringify(data),
       });
       if (!res.ok) throw new Error("Failed to create rental");
