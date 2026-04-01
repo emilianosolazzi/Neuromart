@@ -57,6 +57,12 @@ export async function registerRoutes(
     return s;
   };
 
+  // Never expose the provider API key to any client.
+  const omitApiKey = <T extends { providerApiKey?: string | null }>(m: T): Omit<T, "providerApiKey"> => {
+    const { providerApiKey: _k, ...rest } = m;
+    return rest;
+  };
+
   app.get(api.users.list.path, async (req, res) => {
     const users = await storage.getUsers();
     res.json(users);
@@ -99,11 +105,11 @@ export async function registerRoutes(
         allModels.sort((a, b) => qualityScoreOf(b) - qualityScoreOf(a));
         const start = (query.page - 1) * query.pageSize;
         const end = start + query.pageSize;
-        return res.json(allModels.slice(start, end));
+        return res.json(allModels.slice(start, end).map(omitApiKey));
       }
 
       const models = await storage.getAiModels(query);
-      res.json(models);
+      res.json(models.map(omitApiKey));
     } catch (err) {
       if (err instanceof z.ZodError) {
         return res.status(400).json({ message: err.errors[0].message, field: err.errors[0].path.join('.') });
@@ -119,7 +125,7 @@ export async function registerRoutes(
       if (!model) {
         return res.status(404).json({ message: 'Model not found' });
       }
-      res.json(model);
+      res.json(omitApiKey(model));
     } catch (err) {
       if (err instanceof z.ZodError) {
         return res.status(400).json({ message: err.errors[0].message, field: err.errors[0].path.join('.') });
@@ -152,7 +158,7 @@ export async function registerRoutes(
       }
 
       const model = await storage.createAiModel(input);
-      res.status(201).json(model);
+      res.status(201).json(omitApiKey(model));
     } catch (err) {
       if (err instanceof z.ZodError) {
         return res.status(400).json({ message: err.errors[0].message, field: err.errors[0].path.join('.') });
@@ -176,7 +182,7 @@ export async function registerRoutes(
       const data = updateAiModelInputSchema.parse(req.body);
       const updated = await storage.updateAiModel(id, data);
       if (!updated) return res.status(404).json({ message: "Model not found" });
-      res.json(updated);
+      res.json(omitApiKey(updated));
     } catch (err) {
       if (err instanceof z.ZodError) {
         return res.status(400).json({ message: err.errors[0].message, field: err.errors[0].path.join('.') });
@@ -355,6 +361,146 @@ export async function registerRoutes(
       });
     } catch (_err) {
       return res.status(500).json({ valid: false, error: "Internal Error" });
+    }
+  });
+
+  // ─── Neuromart Relay ──────────────────────────────────────────────────────
+  // Renters call this endpoint; Neuromart proxies to the provider on their behalf.
+  // Authorization: Bearer nm_{rentalId}_auth_token
+  app.post("/api/inference/:modelId", async (req, res) => {
+    try {
+      const { id: modelId } = idParamSchema.parse(req.params);
+
+      // Validate Bearer token
+      const authHeader = req.headers["authorization"];
+      if (!authHeader || !authHeader.startsWith("Bearer ")) {
+        return res.status(401).json({ error: "Missing or invalid Authorization header" });
+      }
+      const token = authHeader.slice(7).trim();
+      const tokenMatch = /^nm_(\d+)_auth_token$/.exec(token);
+      if (!tokenMatch) {
+        return res.status(401).json({ error: "Invalid token format" });
+      }
+
+      const rentalId = Number(tokenMatch[1]);
+      const rental = await storage.getRentalById(rentalId);
+      if (!rental || rental.status !== "active") {
+        return res.status(401).json({ error: "Token not found or rental is not active" });
+      }
+      if (rental.modelId !== modelId) {
+        return res.status(403).json({ error: "Token is not authorised for this model" });
+      }
+
+      const model = await storage.getAiModel(modelId);
+      if (!model) return res.status(404).json({ error: "Model not found" });
+
+      // Parse request body — accept { prompt } or { messages }
+      const bodySchema = z.object({
+        prompt: z.string().optional(),
+        messages: z.array(z.object({
+          role: z.enum(["user", "assistant", "system"]),
+          content: z.string(),
+        })).optional(),
+      }).refine((b) => Boolean(b.prompt || (b.messages && b.messages.length > 0)), {
+        message: "Either prompt or messages is required",
+      });
+      const body = bodySchema.parse(req.body);
+      const userMessages: { role: "user" | "assistant" | "system"; content: string }[] =
+        body.messages ?? [{ role: "user" as const, content: body.prompt! }];
+
+      const { onboardingMode, provider, providerApiKey } = model;
+      const apiKey = providerApiKey ?? undefined;
+
+      // Self-hosted models manage their own servers — no relay available
+      if (onboardingMode === "self_hosted") {
+        return res.status(501).json({ error: "Self-hosted models route traffic to the provider's own servers. Contact the publisher for access." });
+      }
+
+      // External API — transparent proxy to apiBaseUrl
+      if (onboardingMode === "external_api") {
+        if (!model.apiBaseUrl) {
+          return res.status(502).json({ error: "Model has no endpoint URL configured" });
+        }
+        const proxyRes = await fetch(model.apiBaseUrl, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            ...(apiKey ? { Authorization: `Bearer ${apiKey}` } : {}),
+          },
+          body: JSON.stringify({ messages: userMessages }),
+          signal: AbortSignal.timeout(30_000),
+        });
+        const proxyData = await proxyRes.json();
+        return res.status(proxyRes.status).json(proxyData);
+      }
+
+      // prompt_only / provider_backed — Neuromart calls the underlying provider
+      const systemPrompt = model.systemPrompt ?? undefined;
+      const messages: { role: string; content: string }[] = [
+        ...(systemPrompt ? [{ role: "system", content: systemPrompt }] : []),
+        ...userMessages,
+      ];
+      const resolvedProvider = provider ?? "openai";
+
+      if (resolvedProvider === "anthropic") {
+        const effectiveKey = apiKey ?? process.env.ANTHROPIC_API_KEY;
+        if (!effectiveKey) {
+          return res.status(503).json({ error: "No API key configured for Anthropic provider" });
+        }
+        const aSystem = messages.find((m) => m.role === "system")?.content;
+        const aMessages = messages.filter((m) => m.role !== "system");
+        const aRes = await fetch("https://api.anthropic.com/v1/messages", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "x-api-key": effectiveKey,
+            "anthropic-version": "2023-06-01",
+          },
+          body: JSON.stringify({
+            model: model.modelIdentifier ?? "claude-3-5-haiku-20241022",
+            max_tokens: 4096,
+            ...(aSystem ? { system: aSystem } : {}),
+            messages: aMessages,
+          }),
+          signal: AbortSignal.timeout(60_000),
+        });
+        const aData = await aRes.json();
+        return res.status(aRes.status).json(aData);
+      }
+
+      // OpenAI-compatible path: openai, google, azure, huggingface, custom
+      let baseUrl = "https://api.openai.com/v1";
+      if (resolvedProvider === "azure" || resolvedProvider === "custom") {
+        baseUrl = model.apiBaseUrl ?? baseUrl;
+      } else if (resolvedProvider === "google") {
+        baseUrl = "https://generativelanguage.googleapis.com/v1beta/openai";
+      } else if (resolvedProvider === "huggingface") {
+        baseUrl = "https://api-inference.huggingface.co/v1";
+      }
+
+      const effectiveKey = apiKey ?? process.env.OPENAI_API_KEY;
+      if (!effectiveKey) {
+        return res.status(503).json({ error: `No API key configured for ${resolvedProvider} provider` });
+      }
+      const oaiRes = await fetch(`${baseUrl}/chat/completions`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${effectiveKey}`,
+        },
+        body: JSON.stringify({
+          model: model.modelIdentifier ?? "gpt-4o-mini",
+          messages,
+        }),
+        signal: AbortSignal.timeout(60_000),
+      });
+      const oaiData = await oaiRes.json();
+      return res.status(oaiRes.status).json(oaiData);
+    } catch (err) {
+      if (err instanceof z.ZodError) {
+        return res.status(400).json({ error: err.errors[0].message });
+      }
+      return res.status(500).json({ error: "Internal Error" });
     }
   });
 

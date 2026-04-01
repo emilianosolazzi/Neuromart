@@ -96,6 +96,7 @@ export const aiModels = pgTable("ai_models", {
   creatorId: integer("creator_id").notNull(),
   imageUrl: text("image_url"),
   specialistNiche: text("specialist_niche"),
+  providerApiKey: text("provider_api_key"),
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
 }, (table) => ({
@@ -154,6 +155,7 @@ export const createAiModelInputSchema = insertAiModelSchema.extend({
   systemPrompt: optionalTextSchema,
   pricePerQuery: optionalPriceSchema,
   specialistNiche: optionalTextSchema,
+  providerApiKey: optionalTextSchema,
 }).superRefine((value, ctx) => {
   if (value.pricingModel === "per_request" && !value.pricePerQuery) {
     ctx.addIssue({
@@ -228,6 +230,7 @@ export const updateAiModelInputSchema = insertAiModelSchema
     pricePerQuery: optionalPriceSchema,
     pricingLabel: optionalTextSchema,
     specialistNiche: optionalTextSchema,
+    providerApiKey: optionalTextSchema,
   })
   .partial();
 

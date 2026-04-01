@@ -136,6 +136,7 @@ export default function Dashboard() {
   const [provider, setProvider] = useState<ModelProvider>("custom");
   const [modelStatus, setModelStatus] = useState<ModelStatus>("draft");
   const [specialistNiche, setSpecialistNiche] = useState("");
+  const [providerApiKey, setProviderApiKey] = useState("");
   
   const { data: rentals, isLoading: loadingRentals } = useRentals({
     renterId: userId ?? undefined,
@@ -183,12 +184,14 @@ export default function Dashboard() {
       creatorId: userId,
       imageUrl: (formData.get("imageUrl") as string) || undefined,
       specialistNiche: specialistNiche || undefined,
+      providerApiKey: providerApiKey.trim() || undefined,
     };
 
     createMutation.mutate(data, {
       onSuccess: () => {
         toast({ title: "Model created successfully!" });
         setIsDialogOpen(false);
+        setProviderApiKey("");
       },
       onError: (err) => {
         toast({ title: "Failed to create model", description: err.message, variant: "destructive" });
@@ -426,6 +429,25 @@ export default function Dashboard() {
                     <Label htmlFor="systemPrompt" className="text-zinc-300">System Prompt</Label>
                     <Textarea id="systemPrompt" name="systemPrompt" className="bg-zinc-900 border-zinc-800 focus-visible:ring-primary font-mono text-xs h-32" placeholder="Required for prompt-only products. Optional for provider-backed or API-integrated products." />
                   </div>
+                  {(onboardingMode === "provider_backed" || onboardingMode === "prompt_only") && (
+                    <div className="space-y-2 col-span-2">
+                      <Label htmlFor="providerApiKey" className="text-zinc-300 flex items-center gap-2">
+                        <Key className="h-3.5 w-3.5" /> Provider API Key
+                      </Label>
+                      <Input
+                        id="providerApiKey"
+                        type="password"
+                        autoComplete="off"
+                        value={providerApiKey}
+                        onChange={(e) => setProviderApiKey(e.target.value)}
+                        className="bg-zinc-900 border-zinc-800 focus-visible:ring-primary font-mono text-xs"
+                        placeholder={onboardingMode === "prompt_only" ? "Optional — leave empty to use Neuromart's default keys" : "Your OpenAI / Anthropic / custom provider key"}
+                      />
+                      <p className="text-xs text-zinc-400">
+                        Stored securely and <span className="text-emerald-400 font-medium">never returned to renters</span>. Neuromart uses this key to relay renter requests on your behalf via <code className="text-zinc-300">POST /api/inference/:modelId</code>.
+                      </p>
+                    </div>
+                  )}
                   </div>
                 </div>
 

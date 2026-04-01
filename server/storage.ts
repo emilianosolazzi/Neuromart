@@ -307,6 +307,7 @@ class MemoryStorage implements IStorage {
       creatorId: insertModel.creatorId,
       imageUrl: insertModel.imageUrl ?? null,
       specialistNiche: insertModel.specialistNiche ?? null,
+      providerApiKey: insertModel.providerApiKey ?? null,
       createdAt: new Date(),
       updatedAt: new Date(),
     };
