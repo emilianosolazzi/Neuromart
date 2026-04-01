@@ -1,5 +1,5 @@
 # Neuromart
-<<<<<<< HEAD
+
 
 Specialized AI marketplace for listing, discovering, and renting niche AI models.
 
