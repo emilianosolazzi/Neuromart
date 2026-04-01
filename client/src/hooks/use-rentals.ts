@@ -2,19 +2,30 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "@shared/routes";
 import type { InsertRental, RentalWithDetails } from "@shared/schema";
 
-export function useRentals(renterId?: number | null) {
+export type UseRentalsParams = {
+  renterId?: number;
+  page?: number;
+  pageSize?: number;
+};
+
+export function useRentals(params?: UseRentalsParams) {
   return useQuery<RentalWithDetails[]>({
-    queryKey: [api.rentals.list.path, renterId],
+    queryKey: [api.rentals.list.path, params],
     queryFn: async () => {
       const url = new URL(api.rentals.list.path, window.location.origin);
-      if (renterId) {
-        url.searchParams.set("renterId", renterId.toString());
+      if (params?.renterId) {
+        url.searchParams.set("renterId", params.renterId.toString());
+      }
+      if (params?.page) {
+        url.searchParams.set("page", params.page.toString());
+      }
+      if (params?.pageSize) {
+        url.searchParams.set("pageSize", params.pageSize.toString());
       }
       const res = await fetch(url.toString());
       if (!res.ok) throw new Error("Failed to fetch rentals");
       return res.json();
     },
-    enabled: renterId !== undefined, // Can fetch all if explicitly not filtering
   });
 }
 
